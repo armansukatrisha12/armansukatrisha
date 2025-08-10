@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8" />
+<title>Game Trisha - Kumpulin Batu (HTML)</title>
+<style>
+  body{font-family:Arial,Helvetica,sans-serif;background:#f3f6ff;margin:0;display:flex;flex-direction:column;align-items:center;gap:8px;padding:12px}
+  h1{margin:6px 0;color:#d63384}
+  #topbar{display:flex;gap:8px;align-items:center}
+  canvas{background:#bfe6c9;border:3px solid #234;padding:0;display:block}
+  #controls{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  button,input{padding:8px 10px;font-size:14px}
+  #info{font-size:14px;color:#333}
+  #msg{color:#b02a37;font-weight:700}
+</style>
+</head>
+<body>
+  <h1>Trisha - Kumpulin Batu</h1>
+
+  <div id="topbar">
+    <div id="info">Cara pakai: letakkan <code>trisha.png</code> dan <code>batu.png</code> di folder yang sama dengan file ini, lalu buka. Kalau tidak muncul, gunakan tombol <b>Upload</b>.</div>
+  </div>
+
+  <canvas id="canvas" width="800" height="600"></canvas>
+
+  <div id="controls">
+    <label>
+      Upload Trisha:
+      <input id="uploadTrisha" type="file" accept="image/*">
+    </label>
+    <label>
+      Upload Batu:
+      <input id="uploadBatu" type="file" accept="image/*">
+    </label>
+
+    <button id="restart">Restart</button>
+    <button id="toggleMusic">🔈 Music Off</button>
+    <div id="scoreWrap">Skor: <b id="score">0</b></div>
+    <div id="msg"></div>
+  </div>
+
+<script>
+(() => {
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d');
+  const scoreEl = document.getElementById('score');
+  const msgEl = document.getElementById('msg');
+  const uploadTrisha = document.getElementById('uploadTrisha');
+  const uploadBatu = document.getElementById('uploadBatu');
+  const restartBtn = document.getElementById('restart');
+  const toggleMusicBtn = document.getElementById('toggleMusic');
+
+  const W = canvas.width, H = canvas.height;
+
+  // Game state
+  let score = 0;
+  let target = 20;
+  let speed = 4;
+  let player = { x: 100, y: 100, w: 80, h: 80 };
+  let rocks = [];
+  const ROCK_COUNT = 6;
+
+  // Images (try to load local filenames first)
+  const trishaImg = new Image();
+  trishaImg.src = 'trisha.png';
+  trishaImg.onerror = () => {
+    // will allow upload later; use placeholder
+    console.warn('trisha.png not found or not accessible, use Upload button.');
+  };
+
+  const rockImg = new Image();
+  rockImg.src = 'batu.png';
+  rockImg.onerror = () => {
+    console.warn('batu.png not found or not accessible, use Upload button.');
+  };
+
+  let trishaReady = false;
+  let rockReady = false;
+
+  trishaImg.onload = () => { trishaReady = true; console.log('trisha.png loaded'); };
+  rockImg.onload = () => { rockReady = true; console.log('batu.png loaded'); };
+
+  // fallback placeholders (drawn shapes) if images not available
+  function drawPlayerPlaceholder(x,y,w,h){
+    ctx.fillStyle = '#ff9fcf';
+    ctx.fillRect(x,y,w,h);
+    ctx.fillStyle = '#6a1025';
+    ctx.fillRect(x+10,y+16,8,8);
+    ctx.fillRect(x+w-18,y+16,8,8);
+  }
+  function drawRockPlaceholder(x,y,size){
+    ctx.fillStyle = '#777';
+    ctx.beginPath();
+    ctx.ellipse(x+size/2, y+size/2, size/2, size/2, 0, 0, Math.PI*2);
+    ctx.fill();
+  }
+
+  // Spawn rocks avoiding player
+  function spawnRocks(){
+    rocks = [];
+    for (let i=0;i<ROCK_COUNT;i++){
+      let r;
+      let tries = 0;
+      do {
+        r = { size: 40 + Math.random()*20, x: Math.random()*(W-60), y: Math.random()*(H-140) };
+        tries++;
+      } while (rectsCollide(r, {...player, w:player.w, h:player.h}) && tries < 50);
+      rocks.push(r);
+    }
+  }
+
+  function rectsCollide(a, b){
+    // a: {x,y,size} or {x,y,w,h}
+    const aw = a.w ?? a.size;
+    const ah = a.h ?? a.size;
+    const bx = b.x, by = b.y, bw = b.w, bh = b.h;
+    return a.x < bx + bw && a.x + aw > bx && a.y < by + bh && a.y + ah > by;
+  }
+
+  // Input
+  const keys = {};
+  window.addEventListener('keydown', e => {
+    keys[e.key] = true;
+    // prevent page scroll when using arrows
+    if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].includes(e.key)) e.preventDefault();
+  }, {passive:false});
+  window.addEventListener('keyup', e => keys[e.key] = false);
+
+  // Upload handlers (so user can load local images via file input)
+  uploadTrisha.addEventListener('change', (ev) => {
+    const f = ev.target.files[0];
+    if (!f) return;
+    const url = URL.createObjectURL(f);
+    trishaImg.onload = () => { trishaReady = true; URL.revokeObjectURL(url); msgEl.innerText='Foto Trisha dimuat.'; };
+    trishaImg.onerror = () => { msgEl.innerText='Gagal muat foto Trisha.'; };
+    trishaImg.src = url;
+  });
+  uploadBatu.addEventListener('change', (ev) => {
+    const f = ev.target.files[0];
+    if (!f) return;
+    const url = URL.createObjectURL(f);
+    rockImg.onload = () => { rockReady = true; URL.revokeObjectURL(url); msgEl.innerText='Gambar batu dimuat.'; };
+    rockImg.onerror = () => { msgEl.innerText='Gagal muat gambar batu.'; };
+    rockImg.src = url;
+  });
+
+  // Restart
+  restartBtn.addEventListener('click', () => {
+    score = 0;
+    player.x = 100; player.y = 100;
+    scoreEl.innerText = score;
+    msgEl.innerText = '';
+    spawnRocks();
+  });
+
+  // Optional simple music (muted by default)
+  let musicOn = false;
+  let audio;
+  try {
+    audio = new Audio();
+    audio.src = ""; // no default music; user can later set if wanted
+    audio.loop = true;
+  } catch(e){ audio = null; }
+  toggleMusicBtn.addEventListener('click', () => {
+    if (!audio) return;
+    musicOn = !musicOn;
+    if (musicOn) { audio.play(); toggleMusicBtn.innerText = '🔊 Music On'; }
+    else { audio.pause(); toggleMusicBtn.innerText = '🔈 Music Off'; }
+  });
+
+  // Update + draw
+  function update(){
+    // movement (arrow keys or WASD)
+    if (keys['ArrowUp']||keys['w']) player.y -= speed;
+    if (keys['ArrowDown']||keys['s']) player.y += speed;
+    if (keys['ArrowLeft']||keys['a']) player.x -= speed;
+    if (keys['ArrowRight']||keys['d']) player.x += speed;
+
+    // bounds
+    player.x = Math.max(0, Math.min(W - player.w, player.x));
+    player.y = Math.max(0, Math.min(H - player.h, player.y));
+
+    // collisions
+    for (let i = rocks.length - 1; i >= 0; i--) {
+      const r = { x: rocks[i].x, y: rocks[i].y, w: rocks[i].size, h: rocks[i].size };
+      if (rectsCollide(r, player)) {
+        // pickup
+        rocks.splice(i,1);
+        score++;
+        scoreEl.innerText = score;
+        // spawn another so always ROCK_COUNT on map
+        let newR;
+        let tries=0;
+        do {
+          newR = { size: 40 + Math.random()*20, x: Math.random()*(W-60), y: Math.random()*(H-140) };
+          tries++;
+        } while (rectsCollide(newR, player) && tries<60);
+        rocks.push(newR);
+        if (score >= target) {
+          msgEl.innerText = `Kamu Menang! Kumpulkan ${target} batu. (Tekan Restart)`;
+        }
+      }
+    }
+  }
+
+  function draw(){
+    // clear
+    ctx.clearRect(0,0,W,H);
+
+    // background simple
+    ctx.fillStyle = '#dfffd6';
+    ctx.fillRect(0,0,W,H);
+
+    // draw rocks
+    for (const r of rocks) {
+      if (rockReady) {
+        try {
+          ctx.drawImage(rockImg, r.x, r.y, r.size, r.size);
+        } catch(e) {
+          // fallback
+          drawRockPlaceholder(r.x, r.y, r.size);
+        }
+      } else {
+        drawRockPlaceholder(r.x, r.y, r.size);
+      }
+    }
+
+    // draw player
+    if (trishaReady) {
+      try {
+        ctx.drawImage(trishaImg, player.x, player.y, player.w, player.h);
+      } catch(e) {
+        drawPlayerPlaceholder(player.x, player.y, player.w, player.h);
+      }
+    } else {
+      drawPlayerPlaceholder(player.x, player.y, player.w, player.h);
+    }
+
+    // HUD
+    ctx.fillStyle = '#222';
+    ctx.font = '16px Arial';
+    ctx.fillText(`Skor: ${score}`, 12, 20);
+    ctx.fillText(`Target: ${target}`, 12, 40);
+  }
+
+  // main loop
+  function loop(){
+    update();
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  // initialize
+  spawnRocks();
+  scoreEl.innerText = score;
+  loop();
+
+  // helpful: focus page so keyboard works
+  window.addEventListener('click', ()=> window.focus());
+
+  // developer hints in console:
+  console.log('Game ready. Jika gambar tidak muncul, gunakan tombol Upload untuk Trisha & Batu.');
+})();
+</script>
+</body>
+</html>
